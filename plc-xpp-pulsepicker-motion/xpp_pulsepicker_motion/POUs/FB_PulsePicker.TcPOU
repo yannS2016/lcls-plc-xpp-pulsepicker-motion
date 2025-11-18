@@ -1,0 +1,314 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <POU Name="FB_PulsePicker" Id="{97f846d8-0d1c-4165-b97d-0fcf166233cd}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_PulsePicker
+VAR PERSISTENT
+    ModeSelect : E_ModeSelector := E_ModeSelector.ModeNone;;
+ 	StatusIndicator : E_StatusIndicator := E_StatusIndicator.WaitModeSelect;
+    SlitStatusFlag : INT := 99;
+    SweepDistance : INT;      
+    EncoderSweepDistance : INT;
+    EncoderDrift : INT;
+    DriftLimit : INT;
+    MotorCenterPosition : INT;
+    MotorClosedPositionPlus : INT;    // P1
+    MotorClosedPositionMinus : INT;   // P2
+    EncoderCenterPosition : INT;      // N0
+    EncoderClosedPositionPlus : INT;  // N1
+    EncoderClosedPositionMinus : INT; // N2
+    ErrorCheckEnabled : BOOL;
+    MCodeVersion : INT;
+    HeartbeatCounter : INT;
+    EncoderShadow : INT;              // Cs
+    UpperDriftViolations : INT;       // Ud
+    LowerDriftViolations : INT;       // Ld
+    HomingOffset : INT;               // Mo
+
+END_VAR
+
+VAR
+    CurrentState : E_PickerState := E_PickerState.Init;
+    ErrorCode : INT := 0;
+    UserModeReq : UINT := 0;       // From HMI or remote
+    (* Axis/encoder for simulation *)
+    C2 : INT := 0;                // Encoder actual count from axis/IO
+    (* Axis/encoder for simulation *)
+
+
+    (* Speed profiles *)
+    V1_Speed : ST_SpeedProfile := (InitialVelocity := 7500, MaxVelocity := 10000, Acceleration := 1875000, Deceleration := 1875000);
+    V2_Speed : ST_SpeedProfile := (InitialVelocity := 7500, MaxVelocity := 10000, Acceleration := 1875000, Deceleration := 1875000);
+    V3_Speed : ST_SpeedProfile := (InitialVelocity := 5300, MaxVelocity := 10000, Acceleration := 1875000, Deceleration := 1875000);
+    V4_Speed : ST_SpeedProfile := (InitialVelocity := 5300, MaxVelocity := 10000, Acceleration := 1875000, Deceleration := 1875000);
+    V5_Speed : ST_SpeedProfile := (InitialVelocity := 5300, MaxVelocity := 10000, Acceleration := 1875000, Deceleration := 1875000);
+    V9_Speed : ST_SpeedProfile := (InitialVelocity := 640,   MaxVelocity := 2560,  Acceleration := 640,    Deceleration := 640);
+
+    (* FB instances *)
+    fbMoveToNearestClosed : FB_MoveToNearestClosed;
+    fbOneShot : FB_OneShot;
+    fbBurst   : FB_Burst;
+    fbFlipFlop: FB_FlipFlop;
+    fbFastOpen: FB_FastOpen;
+    fbFastClose: FB_FastClose;
+    fbHomeToIndex: FB_HomeToIndex;
+
+    (* Flags/input trips *)
+    OneShotInputTrip : BOOL := FALSE;
+    OneShotActive : BOOL := FALSE;
+    OneShotDirectionPos : BOOL := TRUE;
+
+    BurstInputTrip : BOOL := FALSE;
+    BurstInitDone : BOOL := FALSE;
+
+    FlipFlopInputTrip : BOOL := FALSE;
+    FlipFlopInitDone : BOOL := FALSE;
+
+    FastOpenInitDone : BOOL := FALSE;
+    FastCloseInitDone : BOOL := FALSE;
+    HomingInitDone : BOOL := FALSE;
+
+    ActiveSpeedProfile : ST_SpeedProfile;
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[(* =========================
+   Main State Machine Logic
+   ========================= *)
+CASE CurrentState OF
+
+    E_PickerState.Init:
+        IF ModeSelect <> E_ModeSelector.ModeNone THEN
+            StatusIndicator := E_StatusIndicator.HardReset;           // Hard Reset Init
+            ModeSelect := E_ModeSelector.Reset;
+            SlitStatusFlag := 99;
+            CurrentState := E_PickerState.HardReset;
+        ELSE
+            StatusIndicator := E_StatusIndicator.SoftReset;           // Soft Reset Init
+            ModeSelect := E_ModeSelector.ModeNone;
+            CurrentState := E_PickerState.SoftReset;
+        END_IF
+
+    E_PickerState.HardReset:
+        StatusIndicator := E_StatusIndicator.HardReset;
+        ModeSelect := E_ModeSelector.Reset;
+        SlitStatusFlag := 99;
+        StatusIndicator := E_StatusIndicator.SoftReset;               // Go to soft reset next
+        CurrentState := E_PickerState.SoftReset;
+
+    E_PickerState.SoftReset:
+        StatusIndicator := E_StatusIndicator.SoftReset;
+        HeartbeatCounter := 0;
+        ModeSelect := E_ModeSelector.ModeNone;
+        CurrentState := E_PickerState.ModeSelect;
+
+    E_PickerState.ModeSelect:
+        StatusIndicator := E_StatusIndicator.WaitModeSelect;
+        HeartbeatCounter := HeartbeatCounter + 1;
+
+        IF SlitStatusFlag = 99 THEN
+            ErrorCode := 1;
+            StatusIndicator := E_StatusIndicator.HardReset;
+            CurrentState := E_PickerState.ErrorState;
+        ELSIF ErrorCode <> 0 THEN
+            CurrentState := E_PickerState.ErrorState;
+        ELSIF (UserModeReq >= E_ModeSelector.OneShot) AND (UserModeReq <= E_ModeSelector.Home) THEN
+            ModeSelect := UserModeReq;
+            CurrentState := E_PickerState.ModeExecute;
+        END_IF
+
+    E_PickerState.ModeExecute:
+        CASE ModeSelect OF
+        
+            E_ModeSelector.OneShot:
+                CASE StatusIndicator OF
+                    E_StatusIndicator.WaitModeSelect, E_StatusIndicator.OneShotInit:
+                        StatusIndicator := E_StatusIndicator.OneShotInit;
+                        ActiveSpeedProfile := V1_Speed;
+
+                        // ... (the rest is unchanged, just update status codes) ...
+
+                        StatusIndicator := E_StatusIndicator.OneShotLoopWait;
+
+                    E_StatusIndicator.OneShotLoopWait:
+                        HeartbeatCounter := HeartbeatCounter + 1;
+                        fbOneShot.TriggerInputTrip := OneShotActive AND OneShotInputTrip;
+                        fbOneShot.Execute();
+
+                        // ...
+                        IF ModeSelect = E_ModeSelector.ModeNone THEN
+                            StatusIndicator := E_StatusIndicator.WaitModeSelect;
+                            CurrentState := E_PickerState.ModeSelect;
+                        ELSIF ModeSelect = E_ModeSelector.FastClose THEN
+                            StatusIndicator := E_StatusIndicator.FastCloseInit;
+                            CurrentState := E_PickerState.ModeExecute;
+                        END_IF
+                END_CASE
+
+            E_ModeSelector.FlipFlop:
+                CASE StatusIndicator OF
+                    E_StatusIndicator.WaitModeSelect, E_StatusIndicator.FlipFlopInit:
+                        StatusIndicator := E_StatusIndicator.FlipFlopInit;
+                        ActiveSpeedProfile := V2_Speed;
+                        IF NOT FlipFlopInitDone THEN
+                            // ...
+                            FlipFlopInitDone := TRUE;
+                        END_IF
+                        // ...
+                        IF fbMoveToNearestClosed.Complete THEN
+                            // ...
+                            StatusIndicator := E_StatusIndicator.FlipFlopLoopWait;
+                            FlipFlopInitDone := FALSE;
+                        END_IF
+                    E_StatusIndicator.FlipFlopLoopWait:
+                        HeartbeatCounter := HeartbeatCounter + 1;
+                        fbFlipFlop.Execute();
+                        // ...
+                        IF ModeSelect = E_ModeSelector.ModeNone THEN
+                            StatusIndicator := E_StatusIndicator.WaitModeSelect;
+                            CurrentState := E_PickerState.ModeSelect;
+                        ELSIF ModeSelect = E_ModeSelector.FastClose THEN
+                            StatusIndicator := E_StatusIndicator.FastCloseInit;
+                            CurrentState := E_PickerState.ModeExecute;
+                        END_IF
+                END_CASE
+
+            E_ModeSelector.Burst:
+                CASE StatusIndicator OF
+                    E_StatusIndicator.WaitModeSelect, E_StatusIndicator.BurstInit:
+                        StatusIndicator := E_StatusIndicator.BurstInit;
+                        ActiveSpeedProfile := V3_Speed;
+                        IF NOT BurstInitDone THEN
+                            // ...
+                            BurstInitDone := TRUE;
+                        END_IF
+                        // ...
+                        IF fbMoveToNearestClosed.Complete THEN
+                            // ...
+                            BurstInitDone := FALSE;
+                            StatusIndicator := E_StatusIndicator.BurstLoop;
+                        END_IF
+                    E_StatusIndicator.BurstLoop:
+                        HeartbeatCounter := HeartbeatCounter + 1;
+                        fbBurst.Execute();
+                        // ...
+                        IF ModeSelect = E_ModeSelector.ModeNone THEN
+                            StatusIndicator := E_StatusIndicator.WaitModeSelect;
+                            CurrentState := E_PickerState.ModeSelect;
+                        ELSIF ModeSelect = E_ModeSelector.FastClose THEN
+                            StatusIndicator := E_StatusIndicator.FastCloseInit;
+                            CurrentState := E_PickerState.ModeExecute;
+                        END_IF
+                END_CASE
+
+            E_ModeSelector.FastOpen:
+                CASE StatusIndicator OF
+                    E_StatusIndicator.WaitModeSelect, E_StatusIndicator.FastOpenInit:
+                        StatusIndicator := E_StatusIndicator.FastOpenInit;
+                        ActiveSpeedProfile := V4_Speed;
+                        fbFastOpen.Reset();
+                        fbFastOpen.MotorCenterPosition := MotorCenterPosition;
+                        fbFastOpen.C2 := C2;
+                        fbFastOpen.EncoderShadow := EncoderShadow;
+                        fbFastOpen.SlitStatusFlag := SlitStatusFlag;
+                        StatusIndicator := E_StatusIndicator.FastOpenComplete;
+                    E_StatusIndicator.FastOpenComplete:
+                        fbFastOpen.Execute();
+                        EncoderShadow := fbFastOpen.EncoderShadow;
+                        SlitStatusFlag := fbFastOpen.SlitStatusFlag;
+                        IF fbFastOpen.Complete THEN
+                            ModeSelect := E_ModeSelector.ModeNone;
+                            CurrentState := E_PickerState.ModeSelect;
+                        END_IF
+                END_CASE
+
+            E_ModeSelector.FastClose:
+                CASE StatusIndicator OF
+                    E_StatusIndicator.WaitModeSelect, E_StatusIndicator.FastCloseInit:
+                        StatusIndicator := E_StatusIndicator.FastCloseInit;
+                        ActiveSpeedProfile := V5_Speed;
+                        fbFastClose.Reset();
+                        fbFastClose.MotorClosedPositionPlus := MotorClosedPositionPlus;
+                        fbFastClose.C2 := C2;
+                        fbFastClose.EncoderShadow := EncoderShadow;
+                        fbFastClose.SlitStatusFlag := SlitStatusFlag;
+                        fbFastClose.SlitStatusFlagIn := SlitStatusFlag;
+                        StatusIndicator := E_StatusIndicator.FastCloseComplete;
+                    E_StatusIndicator.FastCloseComplete:
+                        fbFastClose.Execute();
+                        EncoderShadow := fbFastClose.EncoderShadow;
+                        SlitStatusFlag := fbFastClose.SlitStatusFlag;
+                        IF fbFastClose.Complete THEN
+                            ModeSelect := E_ModeSelector.ModeNone;
+                            CurrentState := E_PickerState.ModeSelect;
+                        END_IF
+                END_CASE
+
+            E_ModeSelector.Home:
+                CASE StatusIndicator OF
+                    E_StatusIndicator.WaitModeSelect, E_StatusIndicator.HomingInit:
+                        StatusIndicator := E_StatusIndicator.HomingInit;
+                        ActiveSpeedProfile := V9_Speed;
+                        IF NOT HomingInitDone THEN
+                            fbHomeToIndex.Reset();
+                            fbHomeToIndex.MotorClosedPositionPlus := MotorClosedPositionPlus;
+                            fbHomeToIndex.EncoderClosedPositionPlus := EncoderClosedPositionPlus;
+                            fbHomeToIndex.MagicOffset := HomingOffset;
+                            fbHomeToIndex.HomingSpeed := V9_Speed;
+                            fbHomeToIndex.VM := V9_Speed.MaxVelocity;
+                            fbHomeToIndex.EncoderShadow := EncoderShadow;
+                            fbHomeToIndex.SlitStatusFlag := SlitStatusFlag;
+                            fbHomeToIndex.Ud := UpperDriftViolations;
+                            fbHomeToIndex.Lowerd := LowerDriftViolations;
+                            HomingInitDone := TRUE;
+                        END_IF
+                        fbHomeToIndex.Execute();
+                        EncoderShadow := fbHomeToIndex.EncoderShadow;
+                        SlitStatusFlag := fbHomeToIndex.SlitStatusFlag;
+                        UpperDriftViolations := fbHomeToIndex.Ud;
+                        LowerDriftViolations := fbHomeToIndex.Ld;
+                        IF fbHomeToIndex.Complete THEN
+                            HomingInitDone := FALSE;
+                            StatusIndicator := E_StatusIndicator.HomingComplete;
+                            ModeSelect := E_ModeSelector.ModeNone;
+                            CurrentState := E_PickerState.ModeSelect;
+                        END_IF
+                END_CASE
+            ELSE
+                StatusIndicator := E_StatusIndicator.WaitModeSelect;
+                ModeSelect := E_ModeSelector.ModeNone;
+                CurrentState := E_PickerState.ModeSelect;
+        END_CASE
+
+    E_PickerState.ErrorState:
+        IF (SlitStatusFlag = 99) AND (UserModeReq = E_ModeSelector.Home) THEN
+            StatusIndicator := E_StatusIndicator.HomingInit;
+            fbHomeToIndex.Reset();
+            fbHomeToIndex.MotorClosedPositionPlus := MotorClosedPositionPlus;
+            fbHomeToIndex.EncoderClosedPositionPlus := EncoderClosedPositionPlus;
+            fbHomeToIndex.MagicOffset := HomingOffset;
+            fbHomeToIndex.HomingSpeed := V9_Speed;
+            fbHomeToIndex.VM := V9_Speed.MaxVelocity;
+            fbHomeToIndex.EncoderShadow := EncoderShadow;
+            fbHomeToIndex.SlitStatusFlag := SlitStatusFlag;
+            fbHomeToIndex.Ud := UpperDriftViolations;
+            fbHomeToIndex.Lowerd := LowerDriftViolations;
+            fbHomeToIndex.Execute();
+            EncoderShadow := fbHomeToIndex.EncoderShadow;
+            SlitStatusFlag := fbHomeToIndex.SlitStatusFlag;
+            UpperDriftViolations := fbHomeToIndex.Ud;
+            LowerDriftViolations := fbHomeToIndex.Lowerd;
+            IF fbHomeToIndex.Complete THEN
+                StatusIndicator := E_StatusIndicator.HomingComplete;
+                ErrorCode := 0;
+                ModeSelect := E_ModeSelector.ModeNone;
+                CurrentState := E_PickerState.ModeSelect;
+            END_IF
+        END_IF
+
+    ELSE
+        CurrentState := E_PickerState.Init;
+
+END_CASE]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>

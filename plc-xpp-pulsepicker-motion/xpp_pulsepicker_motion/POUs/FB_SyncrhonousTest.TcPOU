@@ -1,0 +1,260 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <POU Name="FB_SyncrhonousTest" Id="{662574c5-ce59-46b9-9ea2-d7eb5d4db814}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_SyncrhonousTest
+VAR
+    (* --- Axis Reference --- *)
+    AxisRef : AXIS_REF;
+
+	fbPersistentDataStorage : FB_PersistentDataStorage;
+    fbMotionStage : FB_MotionStageNC(
+        sName := 'Test2',
+         AxisRef := AxisRef,
+        iPersistentDataStorage := fbPersistentDataStorage
+    ) := (HomeMode:=E_EpicsHomeCmd.LOW_LIMIT);
+	
+    (* --- Timing, Trigger, and Clock --- *)
+//     fbClockSourceInternal    : FB_ClockSourceInternal(
+//         nTimePerScan := 250000,            // 0.25 ms cycle
+//         nStartingTime := 0
+//     );
+    fbClockSourceInternal    : FB_ClockSourceInternal(
+        nTimePerScan := 1000000,            // 1 ms cycle
+        nStartingTime := 0
+    );	
+ 	fbClockSourceEtherCATDistributedClock : FB_ClockSourceEtherCATDistributedClock;
+//     fbTriggerSourceInternal : FB_TriggerSourceInternal(
+//         iClockSource := fbClockSourceEtherCATDistributedClock
+//     );
+    fbTriggerSourceInternal : FB_TriggerSourceInternal(
+        iClockSource := fbClockSourceEtherCATDistributedClock
+    );
+	
+    fbTriggerManagerInternal : FB_TriggerManager(
+        fTriggerFrequencyExpected := 30.0,  // 30 Hz expected trigger input
+        iTriggerSource := fbTriggerSourceInternal
+    );
+//     fbTrajectoryClockSynchronous: FB_TrajectoryClockSynchronous (
+//         fCycleTime := 0.000250,
+//         iClockSource := fbClockSourceEtherCATDistributedClock
+//     );
+//     fbTrajectoryClockSynchronous: FB_TrajectoryClockSynchronous (
+//         fCycleTime := 0.000250,
+//         iClockSource := fbClockSourceInternal
+//     );
+    fbTrajectoryClockSynchronous: FB_TrajectoryClockSynchronous (
+        fCycleTime := 0.001,
+        iClockSource := fbClockSourceInternal
+    );
+    (* --- Trajectory and Buffer --- *)
+    fbTargetPointSynchronousQueue        : FB_TargetPointSynchronousQueue<6>;   // Buffer of size 6
+    fbTargetPointSynchronousLoader     		 : FB_TargetPointSynchronousLoaderFromEpics<1,6>(
+        nMaxNumPointsProcessedPerCycle := 10
+    );
+
+    (* --- Setpoint & Feedback Interfaces --- *)
+    fbSetpointInterfaceNC  : FB_SetpointInterfaceNC(AxisRef := AxisRef);
+    fbFeedbackInterfaceNC  : FB_FeedbackInterfaceNC(AxisRef := AxisRef);
+
+    (* --- Trajectory Synchronous and Error Estimation --- *)
+    fbTrajectorySynchronous : FB_TrajectorySynchronousBezierContinuousSnap(
+        iTrajectoryClock := fbTrajectoryClockSynchronous,
+		bCalcPosPoints := TRUE,
+		bCalcVelPoints := TRUE,
+		bCalcAccPoints := TRUE,
+		bCalcJerkPoints := TRUE,
+		bCalcSnapPoints := TRUE
+    );
+    fbErrorEstimator     : FB_ErrorEstimator(
+        iTrajectoryClock := fbTrajectoryClockSynchronous,
+        iFeedbackInterface := fbFeedbackInterfaceNC,
+        iTargetPointSynchronousQueue := fbTargetPointSynchronousQueue,
+        iTrajectorySynchronous := fbTrajectorySynchronous,
+        iTriggerManager := fbTriggerManagerInternal
+    );
+
+    (* --- Setpoint Generator --- *)
+    fbSetpointGeneratorContinuousSynchronous : FB_SetpointGeneratorContinuousSynchronous(
+        fTimeSyncGain := 0.2,
+		iSetpointInterface := fbSetpointInterfaceNC,
+		iFeedbackInterface := fbFeedbackInterfaceNC,
+		iErrorEstimator := fbErrorEstimator,
+		iTrajectorySynchronous := fbTrajectorySynchronous,
+		iTargetPointSynchronousQueue := fbTargetPointSynchronousQueue,
+		iTrajectoryClock := fbTrajectoryClockSynchronous,
+		iTriggerManager := fbTriggerManagerInternal
+    );
+
+    (* --- Sequencer and EPICS Command/Loader --- *)
+    fbTrajectorySequencerCommandsFromEpics : FB_TrajectorySequencerCommandsFromEpics;
+	
+    fbTrajectorySequencerSynchronous : FB_TrajectorySequencerSynchronous<1>(
+        iTriggerManager := fbTriggerManagerInternal,
+        iTrajectorySequencerCommands := fbTrajectorySequencerCommandsFromEpics
+    );
+
+	arTrajectoryPositions : ARRAY[1..6] OF LREAL := [
+		-11.25,   // up: start
+		-6.11,    // up: end / down: start
+		-0.33,    // down: end / flat: start
+		 0.33,    // flat: end / ramp2: start
+		 6.12,    // ramp2: end / final: start
+		11.25     // final: end
+	];
+	
+	arTargetVelocities : ARRAY[1..6] OF LREAL := [
+		 0.0,     // up: start
+	  2400.0,     // up: end / down: start
+	   300.0,     // down: end / flat: start
+	   300.0,     // flat: end / ramp2: start
+	  2400.0,     // ramp2: end / final: start
+		 0.0      // final: end
+	];
+	
+	arTargetTime : ARRAY[1..6] OF LREAL := [
+	  0.0,            // up: start
+	  0.0042828125,   // up: end / down: start
+	  0.008565625,    // down: end / flat: start
+	  0.010765625,    // flat: end / ramp2: start
+	  0.0150484375,   // ramp2: end / final: start
+	  0.01933125      // final: end
+	];
+    stPoint : ST_TrajectorySynchronousPoint;
+	fbTargetPointSynchronous : FB_TargetPointSynchronous;
+	bHardwareEnableSync AT %Q* :  BOOL;
+	i : INT;
+    (* --- Optionally: index/scan flags, and utility vars for test harness --- *)
+    firstScan  : BOOL := TRUE;
+    nIndex     : INT  := 1;         // Not needed for single axis, just in case
+    seqStep    : E_TrajectorySequenceStep;
+    isIdle     : BOOL;
+	eUserState : E_ValidationStep;
+	bHome: BOOL;
+	bStartCommand: BOOL;
+	bCommandMoveToFirstTarget: BOOL;
+	bQuitEarly: BOOL;
+	bStartTriggers: BOOL;
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[IF firstScan THEN
+
+	bHardwareEnableSync := TRUE;
+	fbMotionStage.EnableMode := LCLS_OOPMotion.E_StageEnableMode.ALWAYS;
+	fbMotionStage.MotionCmd.nCmdData := LCLS_OOPMotion.E_EpicsHomeCmd.LOW_LIMIT;
+	fbMotionStage.MotionCmd.fVelocity:=12.5;
+	fbMotionStage.MotionCmd.fDeceleration := 25.5;
+	fbMotionStage.MotionCmd.fAcceleration:=25.5;
+	fbMotionStage.MotionCmd.fHomePosition := 0;
+
+//     fbTriggerSource.Start(
+//         fFrequency := 30.0,
+//         nTotalNumTriggers := 1
+//     );
+// 	
+//     fbTriggerSource.Reset();
+//     fbTrajectorySequencerSynchronous.Register(
+//         iTargetPointSynchronousQueue := fbTargetPointSynchronousQueue,
+//         iSetpointGeneratorContinuous := fbSetpointGen,
+//         iMotionStage := fbMotionStage,            // Use the motion axis FB here!
+//         iSetpointInterface := fbSetpointInterface
+//     );
+    firstScan := FALSE;
+END_IF
+
+IF bHome THEN
+	fbMotionStage.MotionCmd.bHomeCmd := TRUE;
+	bHome := FALSE;
+END_IF
+
+fbClockSourceInternal();
+//fbClockSourceEtherCATDistributedClock();
+fbTriggerSourceInternal();
+fbTrajectoryClockSynchronous();
+fbTriggerManagerInternal();
+
+// call for each axis
+fbMotionStage();
+
+fbSetpointInterfaceNC();
+fbErrorEstimator();
+fbSetpointGeneratorContinuousSynchronous();
+fbTrajectorySequencerSynchronous();
+///////////////////////////////////
+fbTrajectorySequencerSynchronous();
+
+CASE eUserState OF
+	E_ValidationStep.INITIALIZE:
+	 	fbTriggerSourceInternal.Reset();
+        //fbTriggerManager.ResetTriggerCounter();
+        fbTriggerManagerInternal.ResetTriggerCounter();
+		
+		fbTrajectorySequencerSynchronous.Register(
+			iTargetPointSynchronousQueue := fbTargetPointSynchronousQueue,
+			iSetpointGeneratorContinuous := fbSetpointGeneratorContinuousSynchronous,
+			iMotionStage := fbMotionStage,            // Use the motion axis FB here!
+			iSetpointInterface := fbSetpointInterfaceNC
+		);
+		eUserState := E_ValidationStep.WAIT_FOR_IDLE;
+		
+    E_ValidationStep.WAIT_FOR_IDLE:
+        IF fbTrajectorySequencerSynchronous.eSequenceStep = E_TrajectorySequenceStep.IDLE THEN
+            eUserState := E_ValidationStep.COMMAND_SEQUENCE_START;
+        END_IF
+		
+    E_ValidationStep.COMMAND_SEQUENCE_START:
+		IF bStartCommand THEN
+			fbTrajectorySequencerCommandsFromEpics.CommandSequenceStart := TRUE;
+		
+			eUserState := E_ValidationStep.GENERATE_TARGET_POINTS;
+			
+			bStartCommand := FALSE;
+		END_IF
+	E_ValidationStep.GENERATE_TARGET_POINTS:
+		FOR i := 1 TO 6 DO
+			fbTargetPointSynchronous.Position := arTrajectoryPositions[i];
+			fbTargetPointSynchronous.T := arTargetTime[i];
+	
+			fbTargetPointSynchronous.Velocity := arTargetVelocities[i];   // If your system uses velocity (optional)
+			fbTargetPointSynchronous.Acceleration := 0.0;
+			fbTargetPointSynchronous.Jerk := 0.0;
+			fbTargetPointSynchronous.Snap := 0.0;
+			fbTargetPointSynchronousQueue.Push(fbTargetPointSynchronous);
+		END_FOR
+		eUserState := E_ValidationStep.COMMAND_MOVE_TO_FIRST_TARGET;
+		
+    E_ValidationStep.COMMAND_MOVE_TO_FIRST_TARGET:
+        IF bCommandMoveToFirstTarget THEN
+            fbTrajectorySequencerCommandsFromEpics.CommandSequenceMoveToFirstTarget := TRUE;
+
+            eUserState := E_ValidationStep.COMMAND_START_TRIGGERS;
+			
+			bCommandMoveToFirstTarget := FALSE;
+        ELSIF fbTrajectorySequencerSynchronous.eSequenceStep = E_TrajectorySequenceStep.CONF_ERROR_RESET THEN
+            bQuitEarly := TRUE;
+        END_IF
+		
+    E_ValidationStep.COMMAND_START_TRIGGERS:
+        IF bStartTriggers THEN
+            //fbTriggerSourceInternal.Start(fFrequency := GVL_Constants.fTargetFrequency, nTotalNumTriggers := nNumTargets);
+			fbTriggerSourceInternal.Start(
+				fFrequency := 30.0,
+				nTotalNumTriggers := 1
+			);
+            eUserState := E_ValidationStep.CONFIRM_BACK_TO_IDLE;
+			
+			bStartTriggers := FALSE;
+        ELSIF fbTrajectorySequencerSynchronous.eSequenceStep = E_TrajectorySequenceStep.CONF_ERROR_RESET THEN
+            bQuitEarly := TRUE;
+        END_IF
+		
+	E_ValidationStep.CONFIRM_BACK_TO_IDLE:
+        IF fbTrajectorySequencerSynchronous.eSequenceStep = E_TrajectorySequenceStep.IDLE THEN
+            eUserState := E_ValidationStep.COMMAND_SEQUENCE_START;
+        ELSIF fbTrajectorySequencerSynchronous.eSequenceStep = E_TrajectorySequenceStep.CONF_ERROR_RESET THEN
+            bQuitEarly := TRUE;
+        END_IF
+END_CASE]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>

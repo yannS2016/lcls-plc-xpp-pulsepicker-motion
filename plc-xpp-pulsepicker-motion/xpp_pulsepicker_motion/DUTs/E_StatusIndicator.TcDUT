@@ -1,0 +1,37 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <DUT Name="E_StatusIndicator" Id="{b89278ed-6a01-4923-a697-63d6bcfefc4c}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+{attribute 'strict'}
+{attribute 'to_string'}
+TYPE E_StatusIndicator :
+(
+// Mode Select/Resets
+    WaitModeSelect := 0,
+    // One-Shot
+    OneShotInit := 10,
+    OneShotLoopWait := 11,
+    OneShotComplete := 12,
+    // Flip-Flop
+    FlipFlopInit := 20,
+    FlipFlopLoopWait := 21,
+    FlipFlopActive := 22,
+    // Burst
+    BurstInit := 30,
+    BurstLoop := 31,
+    // Fast Open/Close
+    FastOpenInit := 40,
+    FastOpenComplete := 41,
+    FastCloseInit := 50,
+    FastCloseComplete := 51,
+    // Homing
+    HomingInit := 70,
+    HomingComplete := 79,
+    // Special states
+    HardReset := 80,
+    SoftReset := 81
+);
+END_TYPE
+]]></Declaration>
+  </DUT>
+</TcPlcObject>

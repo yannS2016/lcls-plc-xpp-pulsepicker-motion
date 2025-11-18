@@ -1,0 +1,103 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <POU Name="FB_FlipFlop" Id="{b5ed133b-f75f-446c-b5c9-2ed6e6ec55ae}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_FlipFlop
+VAR_INPUT
+    MotorClosedPositionPlus  : INT;            // P1
+    MotorClosedPositionMinus : INT;            // P2
+    EncoderClosedPositionPlus: INT;            // N1
+    EncoderClosedPositionMinus: INT;           // N2
+    DriftLimit               : INT;
+    ErrorCheckEnabled        : BOOL;
+    C2                       : INT;            // encoder count
+    InputTrip                : BOOL;           // TRUE on input pulse
+END_VAR
+VAR_IN_OUT
+    EncoderShadow            : INT;            // Cs
+    SlitStatusFlag           : INT;            // Df
+    UpperDriftViolations     : INT;            // Ud
+    LowerDriftViolations     : INT;            // Ld
+END_VAR
+VAR_OUTPUT
+    Complete                 : BOOL := FALSE;  // TRUE when first move done
+END_VAR
+VAR
+    NextDirectionPos         : BOOL := TRUE;   // TRUE: Arm ISR2/J6, FALSE: Arm ISR1/J5
+    State                    : INT := 0;       // 0: idle/init; 1: closed pos armed; 2: waiting trip; 3: actuation/move
+    LastInputTrip            : BOOL := FALSE;  // For edge detection
+    Drift                    : INT := 0;
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[]]></ST>
+    </Implementation>
+    <Method Name="Execute" Id="{cf78a9c4-8023-4d0e-a8eb-e3f0d1072d6b}">
+      <Declaration><![CDATA[METHOD Execute : BOOL
+VAR
+    Trip : BOOL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[Trip := InputTrip AND NOT LastInputTrip;
+LastInputTrip := InputTrip;
+
+// Init: ensure we're at positive or negative closed
+IF State=0 THEN
+    IF (SlitStatusFlag = -1) THEN
+        NextDirectionPos := TRUE;  // Arm ISR2/J6 on trip
+    ELSE
+        NextDirectionPos := FALSE; // Arm ISR1/J5 on trip
+    END_IF
+    State := 1;
+    Complete := TRUE;              // First move is done on entry
+ELSIF State=1 OR State=2 THEN
+    // Wait for input trip
+    IF Trip THEN
+        State := 3;
+        Complete := FALSE;
+    END_IF
+ELSIF State=3 THEN
+    // Do move and drift calculation
+    IF NextDirectionPos THEN
+        // ISR2/J6: P2→P1
+        // Move motor to P1 (simulate instant for demo)
+        IF ErrorCheckEnabled THEN
+            Drift := EncoderShadow - EncoderClosedPositionMinus; // Cs-N2
+            IF Drift >= DriftLimit THEN
+                UpperDriftViolations := UpperDriftViolations + 1;
+            END_IF
+        END_IF
+        SlitStatusFlag := 1;    // Positive closed
+        EncoderShadow := C2;
+        NextDirectionPos := FALSE; // Next trip arms negative direction (J5)
+    ELSE
+        // ISR1/J5: P1→P2
+        // Move motor to P2 (simulate instant for demo)
+        IF ErrorCheckEnabled THEN
+            Drift := EncoderClosedPositionPlus - EncoderShadow; // N1-Cs
+            IF Drift >= DriftLimit THEN
+                LowerDriftViolations := LowerDriftViolations + 1;
+            END_IF
+        END_IF
+        SlitStatusFlag := -1;   // Negative closed
+        EncoderShadow := C2;
+        NextDirectionPos := TRUE; // Next trip arms positive direction (J6)
+    END_IF
+    State := 2;    // Return to wait for input trip
+    Complete := TRUE;
+END_IF]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="Reset" Id="{48cf9b15-fe8a-473c-ae21-765d299160b5}">
+      <Declaration><![CDATA[METHOD Reset : BOOL
+VAR_INPUT
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[    State := 0;
+    Complete := FALSE;
+    NextDirectionPos := TRUE; // Default to J6]]></ST>
+      </Implementation>
+    </Method>
+  </POU>
+</TcPlcObject>

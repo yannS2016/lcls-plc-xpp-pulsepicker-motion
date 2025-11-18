@@ -1,0 +1,53 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <POU Name="FB_FastOpen" Id="{c73d2697-7522-4d8d-b835-3670f2667cbf}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK  FB_FastOpen
+VAR_INPUT
+    MotorCenterPosition : INT;           // P0 (open pos)
+    C2 : INT;                            // Encoder actual count
+END_VAR
+VAR_IN_OUT
+    EncoderShadow : INT;                 // Cs (shadow register)
+    SlitStatusFlag : INT;                // Df
+END_VAR
+VAR_OUTPUT
+    Complete : BOOL := FALSE;
+END_VAR
+VAR
+    State : INT := 0; // 0: idle, 1: moving, 2: done
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[]]></ST>
+    </Implementation>
+    <Method Name="Execute" Id="{eb783105-8088-47a1-b1bf-6fcac722cbcb}">
+      <Declaration><![CDATA[METHOD Execute : BOOL
+VAR_INPUT
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[IF State = 0 THEN
+    // Start movement to open (simulate instant success; call MC_MoveAbsolute in real system)
+    State := 1;
+    Complete := FALSE;
+ELSIF State = 1 THEN
+    // Simulate motion complete; check actual motion in real system
+    EncoderShadow := C2;
+    SlitStatusFlag := 0;      // Open
+    State := 2;
+    Complete := TRUE;
+END_IF]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="Reset" Id="{0da11e5b-aeee-4483-a1a2-5989efc86cfd}">
+      <Declaration><![CDATA[METHOD Reset : BOOL
+VAR_INPUT
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[    State := 0;
+    Complete := FALSE;]]></ST>
+      </Implementation>
+    </Method>
+  </POU>
+</TcPlcObject>

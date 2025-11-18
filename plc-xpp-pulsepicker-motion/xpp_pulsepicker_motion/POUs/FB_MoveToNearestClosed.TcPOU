@@ -1,0 +1,61 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <POU Name="FB_MoveToNearestClosed" Id="{6ed107c2-bebb-4576-9274-e415e2ee6172}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_MoveToNearestClosed
+VAR_INPUT
+    MotorClosedPositionPlus : INT;    // P1
+    C2 : INT;                         // Actual encoder count (from axis/encoder)
+    SlitStatusFlagIn : INT;           // Input Df (current position status)
+END_VAR
+VAR_IN_OUT
+    EncoderShadow : INT;              // Cs, shadow register for drift checking
+    SlitStatusFlag : INT;             // Df, output position status
+END_VAR
+VAR_OUTPUT
+    Complete : BOOL := FALSE;
+END_VAR
+VAR
+    State : INT := 0;                 // 0: ready, 1: moving, 2: done
+END_VAR
+
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[]]></ST>
+    </Implementation>
+    <Method Name="Execute" Id="{7018cd86-a621-4abe-a9e6-303a9ceb9a82}">
+      <Declaration><![CDATA[METHOD Execute : BOOL
+VAR_INPUT
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[IF State = 0 THEN
+    IF (SlitStatusFlagIn <> 1) AND (SlitStatusFlagIn <> -1) THEN
+        // Start the move to P1 (simulate or call MC_MoveAbsolute)
+        State := 1;
+        Complete := FALSE;
+    ELSE
+        // Already closed; nothing to do
+        State := 2;
+        Complete := TRUE;
+    END_IF
+ELSIF State = 1 THEN
+    // Simulate move complete; in real code, check axis feedback!
+    EncoderShadow := C2;
+    SlitStatusFlag := 1;         // Signal at positive closed position
+    State := 2;
+    Complete := TRUE;
+END_IF]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="Reset" Id="{304ca3c7-414b-4d51-8819-b3faaecfe198}">
+      <Declaration><![CDATA[METHOD Reset : BOOL
+VAR_INPUT
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[    State := 0;
+    Complete := FALSE;]]></ST>
+      </Implementation>
+    </Method>
+  </POU>
+</TcPlcObject>

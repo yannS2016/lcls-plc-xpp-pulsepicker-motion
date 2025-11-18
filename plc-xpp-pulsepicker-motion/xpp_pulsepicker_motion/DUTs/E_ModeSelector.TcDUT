@@ -1,0 +1,20 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <DUT Name="E_ModeSelector" Id="{f82f0162-029c-4006-a445-f48c61599328}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+{attribute 'to_string'}
+TYPE E_ModeSelector :
+(
+    ModeNone := 0,         // No mode / idle
+    OneShot := 1,          // Mode 1
+    FlipFlop := 2,         // Mode 2
+    Burst := 3,            // Mode 3
+    FastOpen := 4,         // Mode 4
+    FastClose := 5,        // Mode 5
+    Home := 7,             // Mode 7
+    Reset := 99            // Reset
+) UINT;
+END_TYPE
+]]></Declaration>
+  </DUT>
+</TcPlcObject>

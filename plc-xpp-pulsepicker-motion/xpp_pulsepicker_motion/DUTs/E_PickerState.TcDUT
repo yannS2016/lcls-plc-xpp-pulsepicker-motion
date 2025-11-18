@@ -1,0 +1,19 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <DUT Name="E_PickerState" Id="{3f9d7fed-aa26-4174-ba41-fff2dd6788d7}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+{attribute 'strict'}
+{attribute 'to_string'}
+TYPE E_PickerState :
+(
+    Init,           // Startup: Read ModeSelect/SlitStatusFlag from NV
+    HardReset,      // Hard reset initialization
+    SoftReset,      // Soft reset/common block
+    ModeSelect,     // Idle/waiting for user/command mode selection
+    ModeExecute,    // Executing selected mode (One-Shot, Flip-Flop, etc)
+    ErrorState      // Error or drift handling and recovery
+);
+END_TYPE
+]]></Declaration>
+  </DUT>
+</TcPlcObject>

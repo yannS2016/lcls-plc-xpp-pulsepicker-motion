@@ -1,0 +1,116 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <POU Name="FB_Burst" Id="{77fbfe1b-95fb-42a4-9fda-a1f53f402f67}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_Burst
+VAR_INPUT
+    MotorCenterPosition : INT;              // P0
+    MotorClosedPositionPlus : INT;          // P1
+    EncoderCenterPosition : INT;            // N0
+    EncoderClosedPositionPlus : INT;        // N1
+    DriftLimit : INT;                       // Dl
+    ErrorCheckEnabled : BOOL;               // Ec
+    C2 : INT;                               // Actual encoder count
+    InputTrip : BOOL;                       // Rising edge is Input trigger
+END_VAR
+VAR_IN_OUT
+    EncoderShadow : INT;                    // Cs (shadow reg)
+    SlitStatusFlag : INT;                   // Df
+    UpperDriftViolations : INT;             // Ud
+    LowerDriftViolations : INT;             // Ld
+END_VAR
+VAR_OUTPUT
+    Complete : BOOL := FALSE;               // Set TRUE when any move is complete
+END_VAR
+VAR
+    State : INT := 0;                       // 0=idle, 1=open move, 2=close move, 10=waiting for input
+    Drift : INT := 0;
+    InputTripLast : BOOL := FALSE;          // For edge detection
+END_VAR]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[]]></ST>
+    </Implementation>
+    <Method Name="Execute" Id="{57782945-96c3-46c4-8070-fa7c065f0244}">
+      <Declaration><![CDATA[METHOD Execute
+// Edge detection
+VAR
+    Trip : BOOL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[Trip := InputTrip AND NOT InputTripLast;
+InputTripLast := InputTrip;
+
+// Main burst loop. User triggers with input pulse.
+// Initial state: waiting for InputTrip, Df determines direction
+IF State = 0 THEN
+    IF Trip THEN
+        IF SlitStatusFlag = 1 THEN     // Currently closed, need to open on trip
+            StartOpenMove();
+        ELSE                           // Currently open, need to close on trip
+            StartCloseMove();
+        END_IF
+    END_IF
+ELSIF State = 1 THEN
+    // J3: Burst Open ISR
+    // Move shutter to open position (MotorCenterPosition)
+    // Replace with MC_MoveAbsolute or actual axis block (simulate instant success here)
+    IF ErrorCheckEnabled AND (SlitStatusFlag = 1) THEN
+        Drift := EncoderClosedPositionPlus - EncoderShadow; // N1-Cs
+        IF Drift >= DriftLimit THEN
+            LowerDriftViolations := LowerDriftViolations + 1;
+        END_IF
+    END_IF
+    EncoderShadow := C2;
+    SlitStatusFlag := 0;   // Slits are open
+    State := 10;           // Waiting for next input pulse
+    Complete := TRUE;
+
+ELSIF State = 2 THEN
+    // J4: Burst Close ISR
+    // Move shutter to closed position (MotorClosedPositionPlus)
+    // Replace with MC_MoveAbsolute or actual axis block (simulate instant success here)
+    IF ErrorCheckEnabled THEN
+        Drift := EncoderShadow - EncoderCenterPosition; // Cs-N0
+        IF Drift >= DriftLimit THEN
+            UpperDriftViolations := UpperDriftViolations + 1;
+        END_IF
+    END_IF
+    EncoderShadow := C2;
+    SlitStatusFlag := 1;   // Slits are closed
+    State := 10;           // Waiting for next input pulse
+    Complete := TRUE;
+
+ELSIF State = 10 THEN
+    // Await next trigger
+    IF Trip THEN
+        IF SlitStatusFlag = 1 THEN
+            StartOpenMove();
+        ELSE
+            StartCloseMove();
+        END_IF
+    END_IF
+END_IF]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="StartCloseMove" Id="{25271391-6535-4a4c-a8f9-23e58a28698d}">
+      <Declaration><![CDATA[METHOD StartCloseMove
+VAR_INPUT
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[    State := 2;          // Start close move ISR (J4)
+    Complete := FALSE;]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="StartOpenMove" Id="{ada06712-261a-4adf-9bf0-147c89dce3fc}">
+      <Declaration><![CDATA[METHOD StartOpenMove
+VAR_INPUT
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[    State := 1;          // Start open move ISR (J3)
+    Complete := FALSE;]]></ST>
+      </Implementation>
+    </Method>
+  </POU>
+</TcPlcObject>

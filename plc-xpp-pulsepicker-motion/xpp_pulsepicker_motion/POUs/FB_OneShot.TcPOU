@@ -1,0 +1,87 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <POU Name="FB_OneShot" Id="{565d7c19-2dd5-431b-8255-2649b7ba46e0}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_OneShot
+VAR_INPUT
+    MotorClosedPositionPlus : INT;        // P1
+    MotorClosedPositionMinus : INT;       // P2
+    EncoderClosedPositionPlus : INT;      // N1
+    EncoderClosedPositionMinus : INT;     // N2
+    DriftLimit : INT;                     // Dl
+    ErrorCheckEnabled : BOOL;             // Ec
+    C2 : INT;                             // Actual encoder count
+    ArmDirectionPos : BOOL := TRUE;       // TRUE: arm ISR2/P2→P1, FALSE: arm ISR1/P1→P2
+    TriggerInputTrip : BOOL;              // TRUE when Input Trip triggers the action
+END_VAR
+VAR_IN_OUT
+    EncoderShadow : INT;                  // Cs
+    SlitStatusFlag : INT;                 // Df
+    UpperDriftViolations : INT;           // Ud
+    LowerDriftViolations : INT;           // Ld
+END_VAR
+VAR_OUTPUT
+    Complete : BOOL := FALSE;             // Set TRUE when done
+END_VAR
+VAR
+    Drift : INT := 0;
+    MotionState : INT := 0;               // 0: idle/armed, 1: running, 2: done
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[]]></ST>
+    </Implementation>
+    <Method Name="Execute" Id="{e3eee65b-ad11-434f-b1f3-93ca88df7c78}">
+      <Declaration><![CDATA[METHOD Execute : BOOL
+VAR_INPUT
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[// Call cyclically while armed; runs the ISR sequence after Input Trip
+IF MotionState = 0 THEN
+    // Nothing until InputTrip triggers
+    IF TriggerInputTrip THEN
+        MotionState := 1;         // Begin movement
+        Complete := FALSE;
+    END_IF
+ELSIF MotionState = 1 THEN
+    // Axis move (simulate or use your axis FB)
+    IF ArmDirectionPos THEN
+        // Move P2=>P1 (positive)
+        // Example: AxisControl.MoveAbs(MotorClosedPositionPlus) -- Replace with FB or IO
+        // Simulate motion complete immediately for demo!
+        IF ErrorCheckEnabled THEN
+            Drift := EncoderShadow - EncoderClosedPositionMinus; // Dr = Cs - N2
+            IF Drift >= DriftLimit THEN
+                UpperDriftViolations := UpperDriftViolations + 1;
+            END_IF
+        END_IF
+        SlitStatusFlag := 1;     // Positive closed
+    ELSE
+        // Move P1=>P2 (negative)
+        // Example: AxisControl.MoveAbs(MotorClosedPositionMinus)
+        IF ErrorCheckEnabled THEN
+            Drift := EncoderClosedPositionPlus - EncoderShadow; // Dr = N1 - Cs
+            IF Drift >= DriftLimit THEN
+                LowerDriftViolations := LowerDriftViolations + 1;
+            END_IF
+        END_IF
+        SlitStatusFlag := -1;    // Negative closed
+    END_IF
+    EncoderShadow := C2;
+    MotionState := 2;             // Finished
+    Complete := TRUE;
+END_IF]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="Reset" Id="{cdb5b011-d9cd-494a-b75c-141591216828}">
+      <Declaration><![CDATA[METHOD Reset : BOOL
+VAR_INPUT
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[    MotionState := 0;
+    Complete := FALSE;]]></ST>
+      </Implementation>
+    </Method>
+  </POU>
+</TcPlcObject>

@@ -1,0 +1,85 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <POU Name="FB_HomeToIndex" Id="{a97012d4-df2a-4180-a42e-58cf3ac5bf40}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_HomeToIndex
+VAR_INPUT
+    MotorClosedPositionPlus : INT;   // P1
+    EncoderClosedPositionPlus: INT;  // N1
+    MagicOffset : INT;               // Mo
+    HomingSpeed : LREAL;      // CL V9 (see earlier struct)
+    VM : LREAL;                        // Max velocity (from speed profile)
+END_VAR
+VAR_IN_OUT
+    EncoderShadow : INT;             // Cs
+    SlitStatusFlag : INT;            // Df
+    Ud : INT;                        // Upper drift violation counter
+    Lowerd : INT;                        // Lower drift violation counter
+END_VAR
+VAR_OUTPUT
+    Complete : BOOL := FALSE;
+END_VAR
+VAR
+    State : INT := 0;
+    DoneHome : BOOL := FALSE;
+    DoneOffset : BOOL := FALSE;
+END_VAR]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[]]></ST>
+    </Implementation>
+    <Method Name="Execute" Id="{28ab62ae-50a9-41e9-8861-726b35a3f4f4}">
+      <Declaration><![CDATA[METHOD Execute : BOOL
+VAR_INPUT
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[// State 0: Start Homing
+IF State = 0 THEN
+    // Load homing speed profile (CL V9) - can set to axis FB
+    // (Your MC_Home or similar FB called here with VM etc.)
+    // For demo, just set DoneHome true immediately, replace with real move!
+    DoneHome := TRUE;
+    State := 1;
+END_IF
+
+// State 1: Wait for Homing move complete
+IF State = 1 THEN
+    IF DoneHome THEN
+        // Now do relative move by magic offset to positive closed (P1)
+        // MC_MoveRelative(Mo ...) here in real system!
+        DoneOffset := TRUE;
+        State := 2;
+    END_IF
+END_IF
+
+// State 2: Wait for move by Mo complete
+IF State = 2 THEN
+    IF DoneOffset THEN
+        // Set C1 and C2 appropriately
+        // In real code, set axis reference to MotorClosedPositionPlus
+        // Set encoder reference to EncoderClosedPositionPlus
+        // Sync shadow register
+        // Set slit state Df to known positive closed
+        SlitStatusFlag := 1;
+        EncoderShadow := EncoderClosedPositionPlus;
+        Ud := 0;
+        Lowerd := 0;
+        Complete := TRUE;
+        State := 3;
+    END_IF
+END_IF]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="Reset" Id="{a3f93e40-95ef-4730-b88b-2c578de51c34}">
+      <Declaration><![CDATA[METHOD Reset : BOOL
+VAR_INPUT
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[    State := 0;
+    DoneHome := FALSE;
+    DoneOffset := FALSE;
+    Complete := FALSE;]]></ST>
+      </Implementation>
+    </Method>
+  </POU>
+</TcPlcObject>

@@ -1,0 +1,13 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <POU Name="MAIN" Id="{7534196b-5208-4624-b3e1-4d0093be325e}" SpecialFunc="None">
+    <Declaration><![CDATA[PROGRAM MAIN
+VAR
+	FB_SyncrhonousTest : FB_SyncrhonousTest;
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[FB_SyncrhonousTest();]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>

@@ -1,0 +1,60 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <POU Name="FB_FastClose" Id="{0e94abec-494d-4612-9922-721fd3573be3}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_FastClose
+VAR_INPUT
+    MotorClosedPositionPlus : INT;       // P1 (positive closed)
+    C2 : INT;                            // Encoder actual count
+    SlitStatusFlagIn : INT;              // Input Df for position check
+END_VAR
+VAR_IN_OUT
+    EncoderShadow : INT;                 // Cs (shadow register)
+    SlitStatusFlag : INT;                // Df
+END_VAR
+VAR_OUTPUT
+    Complete : BOOL := FALSE;
+END_VAR
+VAR
+    State : INT := 0; // 0: idle, 1: moving, 2: done
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[]]></ST>
+    </Implementation>
+    <Method Name="Execute" Id="{8f6e7839-24ed-4da1-9332-4bca9bff8b25}">
+      <Declaration><![CDATA[METHOD Execute : BOOL
+VAR_INPUT
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[IF State = 0 THEN
+    // Only move if not already closed
+    IF (SlitStatusFlagIn <> 1) AND (SlitStatusFlagIn <> -1) THEN
+        State := 1;       // Start moving to P1
+        Complete := FALSE;
+    ELSE
+        // Already closed, skip to complete
+        State := 2;
+        Complete := TRUE;
+    END_IF
+ELSIF State = 1 THEN
+    // Simulate motion complete; check actual axis in a real system
+    EncoderShadow := C2;
+    SlitStatusFlag := 1;   // Positive closed
+    State := 2;
+    Complete := TRUE;
+END_IF]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="Reset" Id="{7be53d8d-7041-4f2c-9656-99bba48ded5b}">
+      <Declaration><![CDATA[METHOD Reset : BOOL
+VAR_INPUT
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[    State := 0;
+    Complete := FALSE;]]></ST>
+      </Implementation>
+    </Method>
+  </POU>
+</TcPlcObject>
